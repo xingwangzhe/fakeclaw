@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .fc-panel {
+    @apply fixed right-4 top-16 z-[2147483647] w-[360px] rounded-md border border-black bg-white p-3 text-black shadow-lg dark:border-white dark:bg-black dark:text-white;
+  }
+
+  .fc-btn {
+    @apply rounded border border-black px-2 py-1 text-xs transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white dark:hover:bg-neutral-900;
+  }
+
+  .fc-btn-primary {
+    @apply fc-btn bg-black text-white hover:bg-neutral-800 dark:bg-white dark:text-black dark:hover:bg-neutral-200;
+  }
+
+  .fc-input {
+    @apply w-full rounded border border-black bg-white px-2 py-1 text-xs text-black outline-none placeholder:text-neutral-500 focus:border-black dark:border-white dark:bg-black dark:text-white;
+  }
+
+  .fc-label {
+    @apply mb-1 block text-xs font-medium;
+  }
+}
