@@ -4,6 +4,7 @@ import type { TiebaAction, TiebaRequest, TiebaResponse } from '@/types/messages'
 type ThemeMode = 'light' | 'dark';
 
 const THEME_KEY = 'fc_theme';
+const TOKEN_KEY = 'fc_token';
 
 const actionLabelMap: Record<TiebaAction, string> = {
   replyMe: '读取回复消息',
@@ -37,6 +38,11 @@ async function resolveTheme(): Promise<ThemeMode> {
   return result[THEME_KEY] === 'dark' || result[THEME_KEY] === 'light'
     ? result[THEME_KEY]
     : resolveThemeBySystem();
+}
+
+async function resolveToken(): Promise<string> {
+  const result = await browser.storage.local.get(TOKEN_KEY);
+  return typeof result[TOKEN_KEY] === 'string' ? result[TOKEN_KEY] : '';
 }
 
 function buildPayload(action: TiebaAction, root: HTMLElement): Record<string, unknown> {
@@ -134,6 +140,16 @@ export default defineContentScript({
       </div>
       <p class="mb-2 text-xs text-neutral-700 dark:text-neutral-300">仅黑白双模式。支持发帖、回复、点赞和只读查询。</p>
 
+      <div class="mb-2 rounded border border-black p-2 dark:border-white">
+        <label class="fc-label" for="fc-token">TB_TOKEN（可在这里直接修改）</label>
+        <textarea id="fc-token" rows="2" class="fc-input resize-none" placeholder="粘贴 TB_TOKEN"></textarea>
+        <div class="mt-2 flex gap-2">
+          <button type="button" id="fc-token-save" class="fc-btn-primary">保存 Token</button>
+          <button type="button" id="fc-token-clear" class="fc-btn">清空 Token</button>
+        </div>
+        <p id="fc-token-state" class="mt-1 text-xs text-neutral-700 dark:text-neutral-300">Token 状态：未保存</p>
+      </div>
+
       <div class="mb-2 grid grid-cols-2 gap-2">
         <button type="button" data-action="replyMe" class="fc-btn">读取回复消息</button>
         <button type="button" data-action="listThreads" class="fc-btn">读取帖子列表</button>
@@ -172,6 +188,10 @@ export default defineContentScript({
 
     const close = panel.querySelector<HTMLButtonElement>('#fc-close');
     const runBtn = panel.querySelector<HTMLButtonElement>('#fc-run');
+    const tokenInput = panel.querySelector<HTMLTextAreaElement>('#fc-token');
+    const tokenSaveBtn = panel.querySelector<HTMLButtonElement>('#fc-token-save');
+    const tokenClearBtn = panel.querySelector<HTMLButtonElement>('#fc-token-clear');
+    const tokenStateNode = panel.querySelector<HTMLElement>('#fc-token-state');
     const statusNode = panel.querySelector<HTMLElement>('#fc-status');
     const outputNode = panel.querySelector<HTMLElement>('#fc-output');
     const actionButtons = Array.from(panel.querySelectorAll<HTMLButtonElement>('button[data-action]'));
@@ -197,6 +217,68 @@ export default defineContentScript({
 
     close?.addEventListener('click', () => {
       panel.classList.add('hidden');
+    });
+
+    const initialToken = await resolveToken();
+    if (tokenInput) {
+      tokenInput.value = initialToken;
+    }
+    if (tokenStateNode) {
+      tokenStateNode.textContent = initialToken.trim().length > 0 ? 'Token 状态：已保存' : 'Token 状态：未保存';
+    }
+
+    tokenSaveBtn?.addEventListener('click', async () => {
+      if (!tokenInput || !tokenStateNode || !statusNode) {
+        return;
+      }
+      const token = tokenInput.value.trim();
+      if (!token) {
+        statusNode.textContent = 'Token 不能为空。';
+        return;
+      }
+
+      tokenSaveBtn.disabled = true;
+      if (tokenClearBtn) {
+        tokenClearBtn.disabled = true;
+      }
+
+      try {
+        await browser.storage.local.set({ [TOKEN_KEY]: token });
+        tokenStateNode.textContent = 'Token 状态：已保存';
+        statusNode.textContent = 'Token 已保存，可随时再次修改。';
+      } catch (error) {
+        statusNode.textContent = error instanceof Error ? error.message : 'Token 保存失败。';
+      } finally {
+        tokenSaveBtn.disabled = false;
+        if (tokenClearBtn) {
+          tokenClearBtn.disabled = false;
+        }
+      }
+    });
+
+    tokenClearBtn?.addEventListener('click', async () => {
+      if (!tokenInput || !tokenStateNode || !statusNode) {
+        return;
+      }
+
+      tokenClearBtn.disabled = true;
+      if (tokenSaveBtn) {
+        tokenSaveBtn.disabled = true;
+      }
+
+      try {
+        await browser.storage.local.remove(TOKEN_KEY);
+        tokenInput.value = '';
+        tokenStateNode.textContent = 'Token 状态：未保存';
+        statusNode.textContent = 'Token 已清空。';
+      } catch (error) {
+        statusNode.textContent = error instanceof Error ? error.message : 'Token 清空失败。';
+      } finally {
+        tokenClearBtn.disabled = false;
+        if (tokenSaveBtn) {
+          tokenSaveBtn.disabled = false;
+        }
+      }
     });
 
     for (const button of actionButtons) {
