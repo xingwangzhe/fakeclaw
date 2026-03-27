@@ -33,7 +33,9 @@ async function tiebaGet(path: string, params: Record<string, string>): Promise<u
   });
 
   if (!response.ok) {
-    throw new Error(`网络请求失败: ${response.status}`);
+    const text = await response.text().catch(() => '');
+    const detail = text ? `，响应片段: ${text.slice(0, 200)}` : '';
+    throw new Error(`网络请求失败: ${response.status} ${response.statusText}${detail}`);
   }
 
   const json = await response.json();
@@ -60,7 +62,9 @@ async function tiebaPost(path: string, body: Record<string, unknown>): Promise<u
   });
 
   if (!response.ok) {
-    throw new Error(`网络请求失败: ${response.status}`);
+    const text = await response.text().catch(() => '');
+    const detail = text ? `，响应片段: ${text.slice(0, 200)}` : '';
+    throw new Error(`网络请求失败: ${response.status} ${response.statusText}${detail}`);
   }
 
   const json = await response.json();

@@ -207,6 +207,22 @@ function summarizeResult(action: TiebaAction, data: unknown, context: RuntimeCon
   return '操作已完成。';
 }
 
+function summarizeError(action: TiebaAction, payload: Record<string, unknown>, errorMessage: string): string {
+  const safePayload = { ...payload };
+  if (typeof safePayload.content === 'string' && safePayload.content.length > 120) {
+    safePayload.content = `${safePayload.content.slice(0, 120)}...`;
+  }
+
+  const lines = [
+    `动作: ${actionLabelMap[action]}`,
+    `时间: ${new Date().toLocaleString()}`,
+    `错误: ${errorMessage || '未知错误'}`,
+    `参数: ${JSON.stringify(safePayload, null, 2)}`,
+    '排查建议: 先确认 TB_TOKEN 有效、当前页面在 tieba.baidu.com、再检查网络。',
+  ];
+  return lines.join('\n');
+}
+
 function buildPayload(action: TiebaAction, root: HTMLElement, context: RuntimeContext): Record<string, unknown> {
   const value = (id: string): string => {
     const node = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`);
@@ -526,8 +542,9 @@ export default defineContentScript({
         outputNode.textContent = summarizeResult(action, response.data, runtimeContext);
         setFeedback(`执行成功：${actionLabelMap[action]}`);
       } catch (requestError) {
-        statusNode.textContent = requestError instanceof Error ? requestError.message : '请求失败';
-        outputNode.textContent = '执行失败';
+        const errorMessage = requestError instanceof Error ? requestError.message : '请求失败';
+        statusNode.textContent = errorMessage;
+        outputNode.textContent = summarizeError(action, payload, errorMessage);
         setFeedback(`执行失败：${actionLabelMap[action]}`);
       } finally {
         for (const button of controlButtons) {
