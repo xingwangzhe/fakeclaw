@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 type ThemeMode = 'light' | 'dark';
+type StorageChange = { oldValue?: unknown; newValue?: unknown };
+type StorageChanges = Record<string, StorageChange>;
+type StorageAreaName = 'local' | 'sync' | 'managed' | 'session';
 
 const TOKEN_KEY = 'fc_token';
 const THEME_KEY = 'fc_theme';
@@ -76,8 +79,36 @@ async function saveTheme(mode: ThemeMode): Promise<void> {
   await browser.storage.local.set({ [THEME_KEY]: mode });
 }
 
+function handleStorageChange(
+  changes: StorageChanges,
+  areaName: StorageAreaName,
+): void {
+  if (areaName !== 'local') {
+    return;
+  }
+
+  if (changes[TOKEN_KEY]) {
+    const nextToken = typeof changes[TOKEN_KEY].newValue === 'string' ? changes[TOKEN_KEY].newValue : '';
+    currentToken.value = nextToken;
+    tokenInput.value = nextToken;
+    notice.value = nextToken ? 'Token 已从面板同步更新。' : 'Token 已从面板同步清空。';
+  }
+
+  if (changes[THEME_KEY]) {
+    const nextTheme = changes[THEME_KEY].newValue;
+    if (nextTheme === 'light' || nextTheme === 'dark') {
+      applyTheme(nextTheme);
+    }
+  }
+}
+
 onMounted(() => {
+  browser.storage.onChanged.addListener(handleStorageChange);
   void loadSettings();
+});
+
+onUnmounted(() => {
+  browser.storage.onChanged.removeListener(handleStorageChange);
 });
 </script>
 

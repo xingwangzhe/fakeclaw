@@ -2,6 +2,9 @@ import '@/assets/content.css';
 import type { TiebaAction, TiebaRequest, TiebaResponse } from '@/types/messages';
 
 type ThemeMode = 'light' | 'dark';
+type StorageChange = { oldValue?: unknown; newValue?: unknown };
+type StorageChanges = Record<string, StorageChange>;
+type StorageAreaName = 'local' | 'sync' | 'managed' | 'session';
 
 const THEME_KEY = 'fc_theme';
 const TOKEN_KEY = 'fc_token';
@@ -226,6 +229,40 @@ export default defineContentScript({
     if (tokenStateNode) {
       tokenStateNode.textContent = initialToken.trim().length > 0 ? 'Token 状态：已保存' : 'Token 状态：未保存';
     }
+
+    const handleStorageChange = (
+      changes: StorageChanges,
+      areaName: StorageAreaName,
+    ): void => {
+      if (areaName !== 'local') {
+        return;
+      }
+
+      if (changes[TOKEN_KEY]) {
+        const nextToken = typeof changes[TOKEN_KEY].newValue === 'string' ? changes[TOKEN_KEY].newValue : '';
+        if (tokenInput) {
+          tokenInput.value = nextToken;
+        }
+        if (tokenStateNode) {
+          tokenStateNode.textContent = nextToken.trim().length > 0 ? 'Token 状态：已保存' : 'Token 状态：未保存';
+        }
+      }
+
+      if (changes[THEME_KEY]) {
+        const nextTheme = changes[THEME_KEY].newValue;
+        if (nextTheme === 'dark') {
+          root.classList.add('dark');
+        }
+        if (nextTheme === 'light') {
+          root.classList.remove('dark');
+        }
+      }
+    };
+
+    browser.storage.onChanged.addListener(handleStorageChange);
+    window.addEventListener('beforeunload', () => {
+      browser.storage.onChanged.removeListener(handleStorageChange);
+    });
 
     tokenSaveBtn?.addEventListener('click', async () => {
       if (!tokenInput || !tokenStateNode || !statusNode) {
