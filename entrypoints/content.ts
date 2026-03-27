@@ -307,7 +307,7 @@ export default defineContentScript({
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className =
-      'fixed right-4 top-4 z-[2147483647] rounded border border-black bg-white px-3 py-1 text-xs text-black shadow hover:bg-neutral-100 dark:border-white dark:bg-black dark:text-white dark:hover:bg-neutral-900';
+      'fixed z-[2147483647] cursor-move select-none rounded border border-black bg-white px-3 py-1 text-xs text-black shadow hover:bg-neutral-100 dark:border-white dark:bg-black dark:text-white dark:hover:bg-neutral-900';
     toggle.textContent = 'Fakeclaw';
 
     const panel = document.createElement('section');
@@ -318,6 +318,9 @@ export default defineContentScript({
         <button type="button" id="fc-close" class="fc-btn">关闭</button>
       </div>
       <p class="mb-2 text-xs text-neutral-700 dark:text-neutral-300">仅黑白双模式。支持发帖、回复、点赞和只读查询。</p>
+      <p id="fc-feedback" class="mb-2 rounded border border-black px-2 py-1 text-xs dark:border-white">最近状态：待命</p>
+
+      <div class="fc-scroll">
 
       <div class="mb-2 rounded border border-black p-2 dark:border-white">
         <label class="fc-label" for="fc-token">TB_TOKEN（可在这里直接修改）</label>
@@ -363,6 +366,7 @@ export default defineContentScript({
           { value: '1', text: '取消点赞' },
         ])}
       </div>
+      </div>
 
       <div class="mt-2 flex items-center justify-between">
         <p id="fc-status" class="text-xs text-neutral-700 dark:text-neutral-300">请选择动作并点击执行。</p>
@@ -382,6 +386,7 @@ export default defineContentScript({
     const tokenClearBtn = panel.querySelector<HTMLButtonElement>('#fc-token-clear');
     const tokenStateNode = panel.querySelector<HTMLElement>('#fc-token-state');
     const contextNode = panel.querySelector<HTMLElement>('#fc-context');
+    const feedbackNode = panel.querySelector<HTMLElement>('#fc-feedback');
     const statusNode = panel.querySelector<HTMLElement>('#fc-status');
     const outputNode = panel.querySelector<HTMLElement>('#fc-output');
     const actionButtons = Array.from(panel.querySelectorAll<HTMLButtonElement>('button[data-action]'));
@@ -402,6 +407,17 @@ export default defineContentScript({
     const panelWidth = 360;
     const safePadding = 8;
     const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
+    const placeToggle = (left: number, top: number): void => {
+      const width = toggle.offsetWidth || 80;
+      const height = toggle.offsetHeight || 30;
+      const maxLeft = Math.max(safePadding, window.innerWidth - width - safePadding);
+      const maxTop = Math.max(safePadding, window.innerHeight - height - safePadding);
+      toggle.style.left = `${clamp(left, safePadding, maxLeft)}px`;
+      toggle.style.top = `${clamp(top, safePadding, maxTop)}px`;
+      toggle.style.right = 'auto';
+      toggle.style.bottom = 'auto';
+    };
+
     const placePanel = (left: number, top: number): void => {
       const maxLeft = Math.max(safePadding, window.innerWidth - panel.offsetWidth - safePadding);
       const maxTop = Math.max(safePadding, window.innerHeight - panel.offsetHeight - safePadding);
@@ -411,11 +427,63 @@ export default defineContentScript({
       panel.style.bottom = 'auto';
     };
 
+    placeToggle(window.innerWidth - 96, 16);
     placePanel(window.innerWidth - panelWidth - 16, 64);
 
     let dragging = false;
     let dragOffsetX = 0;
     let dragOffsetY = 0;
+    let toggleDragging = false;
+    let toggleMoved = false;
+    let toggleOffsetX = 0;
+    let toggleOffsetY = 0;
+
+    const setFeedback = (message: string): void => {
+      if (feedbackNode) {
+        feedbackNode.textContent = `最近状态：${message}`;
+      }
+    };
+
+    toggle.addEventListener('pointerdown', (event) => {
+      toggleDragging = true;
+      toggleMoved = false;
+      const rect = toggle.getBoundingClientRect();
+      toggleOffsetX = event.clientX - rect.left;
+      toggleOffsetY = event.clientY - rect.top;
+      toggle.setPointerCapture(event.pointerId);
+    });
+
+    toggle.addEventListener('pointermove', (event) => {
+      if (!toggleDragging) {
+        return;
+      }
+      const nextLeft = event.clientX - toggleOffsetX;
+      const nextTop = event.clientY - toggleOffsetY;
+      const currentLeft = parseFloat(toggle.style.left || '0');
+      const currentTop = parseFloat(toggle.style.top || '0');
+      if (Math.abs(nextLeft - currentLeft) > 2 || Math.abs(nextTop - currentTop) > 2) {
+        toggleMoved = true;
+      }
+      placeToggle(nextLeft, nextTop);
+    });
+
+    toggle.addEventListener('pointerup', (event) => {
+      if (toggle.hasPointerCapture(event.pointerId)) {
+        toggle.releasePointerCapture(event.pointerId);
+      }
+      const wasDragging = toggleDragging;
+      toggleDragging = false;
+      if (wasDragging && !toggleMoved) {
+        panel.classList.toggle('hidden');
+      }
+    });
+
+    toggle.addEventListener('pointercancel', (event) => {
+      toggleDragging = false;
+      if (toggle.hasPointerCapture(event.pointerId)) {
+        toggle.releasePointerCapture(event.pointerId);
+      }
+    });
 
     dragHandle?.addEventListener('pointerdown', (event) => {
       const target = event.target as HTMLElement;
@@ -453,6 +521,8 @@ export default defineContentScript({
     window.addEventListener('resize', () => {
       const rect = panel.getBoundingClientRect();
       placePanel(rect.left, rect.top);
+      const toggleRect = toggle.getBoundingClientRect();
+      placeToggle(toggleRect.left, toggleRect.top);
     });
 
     function paintSelected(): void {
@@ -467,10 +537,6 @@ export default defineContentScript({
         statusNode.textContent = `已选择动作：${actionLabelMap[selectedAction]}`;
       }
     }
-
-    toggle.addEventListener('click', () => {
-      panel.classList.toggle('hidden');
-    });
 
     close?.addEventListener('click', () => {
       panel.classList.add('hidden');
@@ -537,8 +603,10 @@ export default defineContentScript({
         await browser.storage.local.set({ [TOKEN_KEY]: token });
         tokenStateNode.textContent = 'Token 状态：已保存';
         statusNode.textContent = 'Token 已保存，可随时再次修改。';
+        setFeedback('Token 保存成功');
       } catch (error) {
         statusNode.textContent = error instanceof Error ? error.message : 'Token 保存失败。';
+        setFeedback('Token 保存失败');
       } finally {
         tokenSaveBtn.disabled = false;
         if (tokenClearBtn) {
@@ -562,8 +630,10 @@ export default defineContentScript({
         tokenInput.value = '';
         tokenStateNode.textContent = 'Token 状态：未保存';
         statusNode.textContent = 'Token 已清空。';
+        setFeedback('Token 已清空');
       } catch (error) {
         statusNode.textContent = error instanceof Error ? error.message : 'Token 清空失败。';
+        setFeedback('Token 清空失败');
       } finally {
         tokenClearBtn.disabled = false;
         if (tokenSaveBtn) {
@@ -591,11 +661,13 @@ export default defineContentScript({
       if (error) {
         statusNode.textContent = error;
         outputNode.textContent = '参数校验失败';
+        setFeedback('参数校验失败');
         return;
       }
 
       runBtn.disabled = true;
       statusNode.textContent = `执行中：${actionLabelMap[selectedAction]}...`;
+      setFeedback(`执行中：${actionLabelMap[selectedAction]}`);
 
       try {
         const message: TiebaRequest = {
@@ -609,9 +681,11 @@ export default defineContentScript({
         }
         statusNode.textContent = `执行成功：${actionLabelMap[selectedAction]}`;
         outputNode.textContent = summarizeResult(selectedAction, response.data, runtimeContext);
+        setFeedback(`执行成功：${actionLabelMap[selectedAction]}`);
       } catch (requestError) {
         statusNode.textContent = requestError instanceof Error ? requestError.message : '请求失败';
         outputNode.textContent = '执行失败';
+        setFeedback(`执行失败：${actionLabelMap[selectedAction]}`);
       } finally {
         runBtn.disabled = false;
       }

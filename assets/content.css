@@ -4,7 +4,11 @@
 
 @layer components {
   .fc-panel {
-    @apply fixed z-[2147483647] w-[360px] rounded-md border border-black bg-white p-3 text-black shadow-lg dark:border-white dark:bg-black dark:text-white;
+    @apply fixed z-[2147483647] w-[360px] max-h-[calc(100vh-24px)] overflow-hidden rounded-md border border-black bg-white p-3 text-black shadow-lg dark:border-white dark:bg-black dark:text-white;
+  }
+
+  .fc-scroll {
+    @apply max-h-[calc(100vh-260px)] overflow-y-auto pr-1;
   }
 
   .fc-btn {
