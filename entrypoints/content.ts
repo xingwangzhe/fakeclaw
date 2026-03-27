@@ -313,7 +313,7 @@ export default defineContentScript({
     const panel = document.createElement('section');
     panel.className = 'fc-panel hidden';
     panel.innerHTML = `
-      <div class="mb-2 flex items-center justify-between">
+      <div id="fc-drag-handle" class="mb-2 flex cursor-move items-center justify-between select-none">
         <h2 class="text-sm font-semibold">Fakeclaw 贴吧面板</h2>
         <button type="button" id="fc-close" class="fc-btn">关闭</button>
       </div>
@@ -375,6 +375,7 @@ export default defineContentScript({
     document.documentElement.appendChild(root);
 
     const close = panel.querySelector<HTMLButtonElement>('#fc-close');
+    const dragHandle = panel.querySelector<HTMLElement>('#fc-drag-handle');
     const runBtn = panel.querySelector<HTMLButtonElement>('#fc-run');
     const tokenInput = panel.querySelector<HTMLTextAreaElement>('#fc-token');
     const tokenSaveBtn = panel.querySelector<HTMLButtonElement>('#fc-token-save');
@@ -397,6 +398,62 @@ export default defineContentScript({
       const postDetected = runtimeContext.postId ? '已识别当前楼层' : '未识别当前楼层';
       contextNode.textContent = `页面上下文：${threadDetected}，${postDetected}。`;
     }
+
+    const panelWidth = 360;
+    const safePadding = 8;
+    const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max);
+    const placePanel = (left: number, top: number): void => {
+      const maxLeft = Math.max(safePadding, window.innerWidth - panel.offsetWidth - safePadding);
+      const maxTop = Math.max(safePadding, window.innerHeight - panel.offsetHeight - safePadding);
+      panel.style.left = `${clamp(left, safePadding, maxLeft)}px`;
+      panel.style.top = `${clamp(top, safePadding, maxTop)}px`;
+      panel.style.right = 'auto';
+      panel.style.bottom = 'auto';
+    };
+
+    placePanel(window.innerWidth - panelWidth - 16, 64);
+
+    let dragging = false;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+
+    dragHandle?.addEventListener('pointerdown', (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest('#fc-close')) {
+        return;
+      }
+
+      const rect = panel.getBoundingClientRect();
+      dragging = true;
+      dragOffsetX = event.clientX - rect.left;
+      dragOffsetY = event.clientY - rect.top;
+      dragHandle.setPointerCapture(event.pointerId);
+    });
+
+    dragHandle?.addEventListener('pointermove', (event) => {
+      if (!dragging) {
+        return;
+      }
+      placePanel(event.clientX - dragOffsetX, event.clientY - dragOffsetY);
+    });
+
+    const stopDragging = (event: PointerEvent): void => {
+      if (!dragging) {
+        return;
+      }
+      dragging = false;
+      if (dragHandle?.hasPointerCapture(event.pointerId)) {
+        dragHandle.releasePointerCapture(event.pointerId);
+      }
+    };
+
+    dragHandle?.addEventListener('pointerup', stopDragging);
+    dragHandle?.addEventListener('pointercancel', stopDragging);
+
+    window.addEventListener('resize', () => {
+      const rect = panel.getBoundingClientRect();
+      placePanel(rect.left, rect.top);
+    });
 
     function paintSelected(): void {
       for (const button of actionButtons) {
