@@ -5,6 +5,12 @@ type ThemeMode = 'light' | 'dark';
 type StorageChange = { oldValue?: unknown; newValue?: unknown };
 type StorageChanges = Record<string, StorageChange>;
 type StorageAreaName = 'local' | 'sync' | 'managed' | 'session';
+type RuntimeContext = {
+  threadId: string | null;
+  postId: string | null;
+  fallbackThreadId: string | null;
+};
+type ThreadCandidate = { id: string; title: string; author: string };
 
 const THEME_KEY = 'fc_theme';
 const TOKEN_KEY = 'fc_token';
@@ -32,6 +38,16 @@ function createTextField(id: string, label: string, placeholder: string, rows = 
   `;
 }
 
+function createSelect(id: string, label: string, options: Array<{ value: string; text: string }>): string {
+  const optionHtml = options
+    .map((item) => `<option value="${item.value}">${item.text}</option>`)
+    .join('');
+  return `
+    <label class="fc-label" for="${id}">${label}</label>
+    <select id="${id}" class="fc-input">${optionHtml}</select>
+  `;
+}
+
 function resolveThemeBySystem(): ThemeMode {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
@@ -48,7 +64,149 @@ async function resolveToken(): Promise<string> {
   return typeof result[TOKEN_KEY] === 'string' ? result[TOKEN_KEY] : '';
 }
 
-function buildPayload(action: TiebaAction, root: HTMLElement): Record<string, unknown> {
+function readCurrentThreadId(): string | null {
+  const queryKz = new URL(window.location.href).searchParams.get('kz');
+  if (queryKz && queryKz.trim()) {
+    return queryKz.trim();
+  }
+  const pathMatch = window.location.pathname.match(/\/p\/(\d+)/);
+  if (pathMatch?.[1]) {
+    return pathMatch[1];
+  }
+  return null;
+}
+
+function readCurrentPostId(): string | null {
+  const url = new URL(window.location.href);
+  const queryPid = url.searchParams.get('pid') || url.searchParams.get('post_id');
+  if (queryPid && queryPid.trim()) {
+    return queryPid.trim();
+  }
+  return null;
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function getStringField(obj: Record<string, unknown> | null, keys: string[]): string {
+  if (!obj) {
+    return '';
+  }
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+    if (typeof value === 'number') {
+      return String(value);
+    }
+  }
+  return '';
+}
+
+function findThreadCandidates(data: unknown): ThreadCandidate[] {
+  const root = asObject(data);
+  const candidates = [
+    asArray(root?.thread_list),
+    asArray(root?.list),
+    asArray(root?.data_list),
+    asArray(root?.frs_list),
+  ].find((item) => item.length > 0) || (Array.isArray(data) ? data : []);
+
+  return candidates
+    .map((item) => {
+      const obj = asObject(item);
+      const id = getStringField(obj, ['thread_id', 'id', 'kz']);
+      const title = getStringField(obj, ['title', 'thread_title', 'content']) || '未命名帖子';
+      const author = getStringField(obj, ['author_name', 'author', 'user_name']) || '未知作者';
+      return { id, title, author };
+    })
+    .filter((item) => item.id);
+}
+
+function summarizeReplyMessages(data: unknown): string {
+  const root = asObject(data);
+  const list = asArray(root?.reply_list);
+  if (list.length === 0) {
+    return '未读取到回复消息。';
+  }
+
+  const lines = list.slice(0, 8).map((item, index) => {
+    const obj = asObject(item);
+    const content = getStringField(obj, ['content']) || '无内容';
+    const quote = getStringField(obj, ['quote_content']);
+    const unread = Number(obj?.unread ?? 0) === 1 ? '未读' : '已读';
+    return `${index + 1}. [${unread}] ${content}${quote ? `（引用：${quote}）` : ''}`;
+  });
+  return `最近回复消息：\n${lines.join('\n')}`;
+}
+
+function summarizeThreadDetail(data: unknown): string {
+  const root = asObject(data);
+  const threadObj = asObject(root?.thread ?? root?.thread_info);
+  const title = getStringField(threadObj, ['title', 'thread_title']) || '当前帖子';
+  const postList =
+    asArray(root?.post_list).length > 0
+      ? asArray(root?.post_list)
+      : asArray(root?.list).length > 0
+        ? asArray(root?.list)
+        : [];
+  const preview = postList.slice(0, 5).map((item, index) => {
+    const obj = asObject(item);
+    const author = getStringField(obj, ['author_name', 'author', 'user_name']) || '吧友';
+    const content = getStringField(obj, ['content', 'text']) || '无内容';
+    return `${index + 1}. ${author}：${content}`;
+  });
+
+  const header = `帖子详情已获取：${title}`;
+  if (preview.length === 0) {
+    return `${header}\n当前暂无可预览楼层。`;
+  }
+  return `${header}\n楼层预览：\n${preview.join('\n')}`;
+}
+
+function summarizeResult(action: TiebaAction, data: unknown, context: RuntimeContext): string {
+  if (action === 'replyMe') {
+    return summarizeReplyMessages(data);
+  }
+
+  if (action === 'listThreads') {
+    const items = findThreadCandidates(data);
+    if (items.length === 0) {
+      return '已获取帖子列表，但暂时没有可展示内容。';
+    }
+    context.fallbackThreadId = items[0].id;
+    const lines = items.slice(0, 10).map((item, index) => `${index + 1}. ${item.title}（作者：${item.author}）`);
+    return `帖子列表（已自动选择第一条作为后续默认目标）：\n${lines.join('\n')}`;
+  }
+
+  if (action === 'threadDetail') {
+    return summarizeThreadDetail(data);
+  }
+
+  if (action === 'addThread') {
+    const obj = asObject(data);
+    const threadUrl = getStringField(obj, ['thread_url']);
+    return threadUrl ? `发帖成功。\n帖子链接：${threadUrl}` : '发帖成功。';
+  }
+
+  if (action === 'addPost') {
+    return '回复已发送。';
+  }
+
+  if (action === 'opAgree') {
+    return '点赞操作已提交。';
+  }
+
+  return '操作已完成。';
+}
+
+function buildPayload(action: TiebaAction, root: HTMLElement, context: RuntimeContext): Record<string, unknown> {
   const value = (id: string): string => {
     const node = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`);
     return node?.value.trim() ?? '';
@@ -62,7 +220,7 @@ function buildPayload(action: TiebaAction, root: HTMLElement): Record<string, un
     case 'threadDetail':
       return {
         pn: value('fc-detail-pn') || '1',
-        kz: value('fc-kz'),
+        kz: context.threadId || context.fallbackThreadId || '',
         r: value('fc-r') || '0',
       };
     case 'addThread':
@@ -71,18 +229,36 @@ function buildPayload(action: TiebaAction, root: HTMLElement): Record<string, un
         content: value('fc-thread-content'),
       };
     case 'addPost':
-      return {
-        thread_id: value('fc-post-thread-id'),
-        post_id: value('fc-post-id'),
-        content: value('fc-post-content'),
-      };
+      {
+        const target = value('fc-reply-target') || 'thread';
+        const content = value('fc-post-content');
+        if (target === 'post' && context.postId) {
+          return { post_id: context.postId, content };
+        }
+        return {
+          thread_id: context.threadId || context.fallbackThreadId || '',
+          content,
+        };
+      }
     case 'opAgree':
-      return {
-        thread_id: value('fc-agree-thread-id'),
-        post_id: value('fc-agree-post-id'),
-        obj_type: value('fc-obj-type') || '3',
-        op_type: value('fc-op-type') || '0',
-      };
+      {
+        const target = value('fc-like-target') || 'thread';
+        const base = {
+          thread_id: context.threadId || context.fallbackThreadId || '',
+          op_type: value('fc-op-type') || '0',
+        };
+        if (target === 'post' && context.postId) {
+          return {
+            ...base,
+            post_id: context.postId,
+            obj_type: '1',
+          };
+        }
+        return {
+          ...base,
+          obj_type: '3',
+        };
+      }
     default:
       return {};
   }
@@ -108,11 +284,11 @@ function validatePayload(action: TiebaAction, payload: Record<string, unknown>):
   }
 
   if (action === 'threadDetail' && !getString('kz')) {
-    return '帖子详情需要填写 thread_id(kz)。';
+    return '无法识别帖子上下文。请先打开具体帖子页面，或先执行“读取帖子列表”。';
   }
 
   if (action === 'opAgree' && !getString('thread_id')) {
-    return '点赞需要填写 thread_id。';
+    return '无法识别可点赞的帖子。请先打开具体帖子页面，或先执行“读取帖子列表”。';
   }
 
   return null;
@@ -153,6 +329,10 @@ export default defineContentScript({
         <p id="fc-token-state" class="mt-1 text-xs text-neutral-700 dark:text-neutral-300">Token 状态：未保存</p>
       </div>
 
+      <div class="mb-2 rounded border border-black p-2 dark:border-white">
+        <p id="fc-context" class="text-xs text-neutral-700 dark:text-neutral-300">正在识别当前页面上下文...</p>
+      </div>
+
       <div class="mb-2 grid grid-cols-2 gap-2">
         <button type="button" data-action="replyMe" class="fc-btn">读取回复消息</button>
         <button type="button" data-action="listThreads" class="fc-btn">读取帖子列表</button>
@@ -166,24 +346,29 @@ export default defineContentScript({
         ${createField('fc-pn', 'replyMe 页码 pn', '1')}
         ${createField('fc-sort-type', 'listThreads sort_type', '0:时间 3:热门')}
         ${createField('fc-detail-pn', 'threadDetail 页码 pn', '1')}
-        ${createField('fc-kz', 'thread_id(kz)', '123456')}
         ${createField('fc-r', 'threadDetail r', '0:正序 1:倒序 2:热门')}
         ${createField('fc-title', '发帖标题', '最多30字符')}
         ${createTextField('fc-thread-content', '发帖内容', '纯文本，最多1000字符')}
-        ${createField('fc-post-thread-id', '回复 thread_id', '可选')}
-        ${createField('fc-post-id', '回复 post_id', '可选')}
+        ${createSelect('fc-reply-target', '回复目标', [
+          { value: 'thread', text: '回复当前帖子' },
+          { value: 'post', text: '优先回复当前楼层（识别到时）' },
+        ])}
         ${createTextField('fc-post-content', '回复内容', '纯文本，最多1000字符')}
-        ${createField('fc-agree-thread-id', '点赞 thread_id', '必填')}
-        ${createField('fc-agree-post-id', '点赞 post_id', '可选')}
-        ${createField('fc-obj-type', 'obj_type', '1楼层 2楼中楼 3主帖')}
-        ${createField('fc-op-type', 'op_type', '0点赞 1取消')}
+        ${createSelect('fc-like-target', '点赞目标', [
+          { value: 'thread', text: '当前主帖' },
+          { value: 'post', text: '当前楼层（识别到时）' },
+        ])}
+        ${createSelect('fc-op-type', '点赞动作', [
+          { value: '0', text: '点赞' },
+          { value: '1', text: '取消点赞' },
+        ])}
       </div>
 
       <div class="mt-2 flex items-center justify-between">
         <p id="fc-status" class="text-xs text-neutral-700 dark:text-neutral-300">请选择动作并点击执行。</p>
         <button id="fc-run" type="button" class="fc-btn-primary">执行</button>
       </div>
-      <pre id="fc-output" class="mt-2 max-h-40 overflow-auto rounded border border-black p-2 text-[11px] dark:border-white">暂无结果</pre>
+      <div id="fc-output" class="mt-2 max-h-40 overflow-auto rounded border border-black p-2 text-xs leading-5 dark:border-white">暂无结果</div>
     `;
 
     root.append(toggle, panel);
@@ -195,11 +380,23 @@ export default defineContentScript({
     const tokenSaveBtn = panel.querySelector<HTMLButtonElement>('#fc-token-save');
     const tokenClearBtn = panel.querySelector<HTMLButtonElement>('#fc-token-clear');
     const tokenStateNode = panel.querySelector<HTMLElement>('#fc-token-state');
+    const contextNode = panel.querySelector<HTMLElement>('#fc-context');
     const statusNode = panel.querySelector<HTMLElement>('#fc-status');
     const outputNode = panel.querySelector<HTMLElement>('#fc-output');
     const actionButtons = Array.from(panel.querySelectorAll<HTMLButtonElement>('button[data-action]'));
 
     let selectedAction: TiebaAction = 'addPost';
+    const runtimeContext: RuntimeContext = {
+      threadId: readCurrentThreadId(),
+      postId: readCurrentPostId(),
+      fallbackThreadId: null,
+    };
+
+    if (contextNode) {
+      const threadDetected = runtimeContext.threadId ? '已识别当前帖子' : '未识别当前帖子';
+      const postDetected = runtimeContext.postId ? '已识别当前楼层' : '未识别当前楼层';
+      contextNode.textContent = `页面上下文：${threadDetected}，${postDetected}。`;
+    }
 
     function paintSelected(): void {
       for (const button of actionButtons) {
@@ -332,7 +529,7 @@ export default defineContentScript({
         return;
       }
 
-      const payload = buildPayload(selectedAction, panel);
+      const payload = buildPayload(selectedAction, panel, runtimeContext);
       const error = validatePayload(selectedAction, payload);
       if (error) {
         statusNode.textContent = error;
@@ -354,7 +551,7 @@ export default defineContentScript({
           throw new Error(response?.error || '请求失败');
         }
         statusNode.textContent = `执行成功：${actionLabelMap[selectedAction]}`;
-        outputNode.textContent = JSON.stringify(response.data, null, 2);
+        outputNode.textContent = summarizeResult(selectedAction, response.data, runtimeContext);
       } catch (requestError) {
         statusNode.textContent = requestError instanceof Error ? requestError.message : '请求失败';
         outputNode.textContent = '执行失败';
