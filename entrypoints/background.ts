@@ -158,19 +158,23 @@ async function runAction(action: TiebaAction, payload: Record<string, unknown>):
 }
 
 export default defineBackground(() => {
-  browser.runtime.onMessage.addListener(async (message: TiebaRequest): Promise<TiebaResponse | undefined> => {
+  browser.runtime.onMessage.addListener((message: TiebaRequest, _sender, sendResponse) => {
     if (!message || message.type !== 'tieba:request') {
-      return undefined;
+      return;
     }
 
-    try {
-      const data = await runAction(message.action, message.payload ?? {});
-      return { ok: true, data };
-    } catch (error) {
-      return {
-        ok: false,
-        error: error instanceof Error ? error.message : '请求失败。',
-      };
-    }
+    void (async () => {
+      try {
+        const data = await runAction(message.action, message.payload ?? {});
+        sendResponse({ ok: true, data } satisfies TiebaResponse);
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : '请求失败。',
+        } satisfies TiebaResponse);
+      }
+    })();
+
+    return true;
   });
 });

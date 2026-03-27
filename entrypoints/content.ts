@@ -535,6 +535,9 @@ export default defineContentScript({
           payload,
         };
         const response = (await browser.runtime.sendMessage(message)) as TiebaResponse;
+        if (!response) {
+          throw new Error('未收到后台响应，请检查扩展后台是否正常运行。');
+        }
         if (!response?.ok) {
           throw new Error(response?.error || '请求失败');
         }
