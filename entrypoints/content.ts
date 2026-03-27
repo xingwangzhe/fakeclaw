@@ -1,4 +1,4 @@
-import './content.css';
+import '@/assets/content.css';
 import type { TiebaAction, TiebaRequest, TiebaResponse } from '@/types/messages';
 
 type ThemeMode = 'light' | 'dark';
