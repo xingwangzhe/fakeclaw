@@ -1,5 +1,7 @@
 # Fakeclaw: Tieba Message Tool
 
+<img width="1920" height="965" alt="pixelated-image_1774594597726" src="https://github.com/user-attachments/assets/982ab1f8-1b61-44b3-8de1-ec8e4e358659" />
+
 ## 快速开始
 
 ```bash
