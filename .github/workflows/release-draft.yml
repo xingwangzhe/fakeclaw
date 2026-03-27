@@ -48,6 +48,7 @@ jobs:
           draft: true
           generate_release_notes: true
           files: |
-            .output/*.zip
+            .output/*-chrome.zip
+            .output/*-firefox.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
