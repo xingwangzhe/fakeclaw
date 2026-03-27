@@ -33,8 +33,11 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build zip package
+      - name: Build Chrome zip package
         run: bun run zip
+
+      - name: Build Firefox zip package
+        run: bun run zip:firefox
 
       - name: Create draft release
         uses: softprops/action-gh-release@v2
