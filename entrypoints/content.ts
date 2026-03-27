@@ -11,6 +11,7 @@ type RuntimeContext = {
   fallbackThreadId: string | null;
 };
 type ThreadCandidate = { id: string; title: string; author: string };
+type PanelTab = 'post' | 'reply' | 'query';
 
 const THEME_KEY = 'fc_theme';
 const TOKEN_KEY = 'fc_token';
@@ -214,24 +215,24 @@ function buildPayload(action: TiebaAction, root: HTMLElement, context: RuntimeCo
 
   switch (action) {
     case 'replyMe':
-      return { pn: value('fc-pn') || '1' };
+      return { pn: value('fc-replyme-page') || '1' };
     case 'listThreads':
-      return { sort_type: value('fc-sort-type') || '0' };
+      return { sort_type: value('fc-query-sort') || '0' };
     case 'threadDetail':
       return {
-        pn: value('fc-detail-pn') || '1',
+        pn: value('fc-query-page') || '1',
         kz: context.threadId || context.fallbackThreadId || '',
-        r: value('fc-r') || '0',
+        r: value('fc-query-order') || '0',
       };
     case 'addThread':
       return {
-        title: value('fc-title'),
-        content: value('fc-thread-content'),
+        title: value('fc-post-title'),
+        content: value('fc-post-content'),
       };
     case 'addPost':
       {
         const target = value('fc-reply-target') || 'thread';
-        const content = value('fc-post-content');
+        const content = value('fc-reply-content');
         if (target === 'post' && context.postId) {
           return { post_id: context.postId, content };
         }
@@ -245,7 +246,7 @@ function buildPayload(action: TiebaAction, root: HTMLElement, context: RuntimeCo
         const target = value('fc-like-target') || 'thread';
         const base = {
           thread_id: context.threadId || context.fallbackThreadId || '',
-          op_type: value('fc-op-type') || '0',
+          op_type: value('fc-like-op') || '0',
         };
         if (target === 'post' && context.postId) {
           return {
@@ -322,6 +323,12 @@ export default defineContentScript({
 
       <div class="fc-scroll">
 
+      <div class="mb-2 grid grid-cols-3 gap-1" id="fc-tabs">
+        <button type="button" data-tab="post" class="fc-btn">发帖</button>
+        <button type="button" data-tab="reply" class="fc-btn">回复</button>
+        <button type="button" data-tab="query" class="fc-btn">查询帖子</button>
+      </div>
+
       <div class="mb-2 rounded border border-black p-2 dark:border-white">
         <label class="fc-label" for="fc-token">TB_TOKEN（可在这里直接修改）</label>
         <textarea id="fc-token" rows="2" class="fc-input resize-none" placeholder="粘贴 TB_TOKEN"></textarea>
@@ -336,41 +343,50 @@ export default defineContentScript({
         <p id="fc-context" class="text-xs text-neutral-700 dark:text-neutral-300">正在识别当前页面上下文...</p>
       </div>
 
-      <div class="mb-2 grid grid-cols-2 gap-2">
-        <button type="button" data-action="replyMe" class="fc-btn">读取回复消息</button>
-        <button type="button" data-action="listThreads" class="fc-btn">读取帖子列表</button>
-        <button type="button" data-action="threadDetail" class="fc-btn">读取帖子详情</button>
-        <button type="button" data-action="opAgree" class="fc-btn">点赞</button>
-        <button type="button" data-action="addThread" class="fc-btn">发帖</button>
-        <button type="button" data-action="addPost" class="fc-btn">回复</button>
+      <div id="fc-tab-post" class="mb-2 space-y-2 rounded border border-black p-2 dark:border-white">
+        ${createField('fc-post-title', '帖子标题', '最多30字符')}
+        ${createTextField('fc-post-content', '帖子内容', '纯文本，最多1000字符')}
+        <button id="fc-run-post" type="button" class="fc-btn-primary w-full">发送帖子</button>
       </div>
 
-      <div class="space-y-2 rounded border border-black p-2 dark:border-white">
-        ${createField('fc-pn', 'replyMe 页码 pn', '1')}
-        ${createField('fc-sort-type', 'listThreads sort_type', '0:时间 3:热门')}
-        ${createField('fc-detail-pn', 'threadDetail 页码 pn', '1')}
-        ${createField('fc-r', 'threadDetail r', '0:正序 1:倒序 2:热门')}
-        ${createField('fc-title', '发帖标题', '最多30字符')}
-        ${createTextField('fc-thread-content', '发帖内容', '纯文本，最多1000字符')}
+      <div id="fc-tab-reply" class="mb-2 hidden space-y-2 rounded border border-black p-2 dark:border-white">
         ${createSelect('fc-reply-target', '回复目标', [
           { value: 'thread', text: '回复当前帖子' },
           { value: 'post', text: '优先回复当前楼层（识别到时）' },
         ])}
-        ${createTextField('fc-post-content', '回复内容', '纯文本，最多1000字符')}
+        ${createTextField('fc-reply-content', '回复内容', '纯文本，最多1000字符')}
+        <button id="fc-run-reply" type="button" class="fc-btn-primary w-full">发送回复</button>
         ${createSelect('fc-like-target', '点赞目标', [
           { value: 'thread', text: '当前主帖' },
           { value: 'post', text: '当前楼层（识别到时）' },
         ])}
-        ${createSelect('fc-op-type', '点赞动作', [
+        ${createSelect('fc-like-op', '点赞动作', [
           { value: '0', text: '点赞' },
           { value: '1', text: '取消点赞' },
         ])}
+        <button id="fc-run-like" type="button" class="fc-btn w-full">执行点赞动作</button>
+      </div>
+
+      <div id="fc-tab-query" class="mb-2 space-y-2 rounded border border-black p-2 dark:border-white">
+        ${createSelect('fc-query-sort', '帖子列表排序', [
+          { value: '0', text: '按时间' },
+          { value: '3', text: '按热度' },
+        ])}
+        <button id="fc-run-list" type="button" class="fc-btn w-full">读取帖子列表</button>
+        ${createField('fc-query-page', '帖子详情页码', '1')}
+        ${createSelect('fc-query-order', '帖子详情顺序', [
+          { value: '0', text: '正序' },
+          { value: '1', text: '倒序' },
+          { value: '2', text: '热门' },
+        ])}
+        <button id="fc-run-detail" type="button" class="fc-btn w-full">读取当前帖子详情</button>
+        ${createField('fc-replyme-page', '回复消息页码', '1')}
+        <button id="fc-run-replyme" type="button" class="fc-btn w-full">读取回复我的消息</button>
       </div>
       </div>
 
       <div class="mt-2 flex items-center justify-between">
-        <p id="fc-status" class="text-xs text-neutral-700 dark:text-neutral-300">请选择动作并点击执行。</p>
-        <button id="fc-run" type="button" class="fc-btn-primary">执行</button>
+        <p id="fc-status" class="text-xs text-neutral-700 dark:text-neutral-300">请选择上方导航后执行操作。</p>
       </div>
       <div id="fc-output" class="mt-2 max-h-40 overflow-auto rounded border border-black p-2 text-xs leading-5 dark:border-white">暂无结果</div>
     `;
@@ -380,7 +396,16 @@ export default defineContentScript({
 
     const close = panel.querySelector<HTMLButtonElement>('#fc-close');
     const dragHandle = panel.querySelector<HTMLElement>('#fc-drag-handle');
-    const runBtn = panel.querySelector<HTMLButtonElement>('#fc-run');
+    const tabButtons = Array.from(panel.querySelectorAll<HTMLButtonElement>('#fc-tabs button[data-tab]'));
+    const postSection = panel.querySelector<HTMLElement>('#fc-tab-post');
+    const replySection = panel.querySelector<HTMLElement>('#fc-tab-reply');
+    const querySection = panel.querySelector<HTMLElement>('#fc-tab-query');
+    const runPostBtn = panel.querySelector<HTMLButtonElement>('#fc-run-post');
+    const runReplyBtn = panel.querySelector<HTMLButtonElement>('#fc-run-reply');
+    const runLikeBtn = panel.querySelector<HTMLButtonElement>('#fc-run-like');
+    const runListBtn = panel.querySelector<HTMLButtonElement>('#fc-run-list');
+    const runDetailBtn = panel.querySelector<HTMLButtonElement>('#fc-run-detail');
+    const runReplyMeBtn = panel.querySelector<HTMLButtonElement>('#fc-run-replyme');
     const tokenInput = panel.querySelector<HTMLTextAreaElement>('#fc-token');
     const tokenSaveBtn = panel.querySelector<HTMLButtonElement>('#fc-token-save');
     const tokenClearBtn = panel.querySelector<HTMLButtonElement>('#fc-token-clear');
@@ -389,9 +414,8 @@ export default defineContentScript({
     const feedbackNode = panel.querySelector<HTMLElement>('#fc-feedback');
     const statusNode = panel.querySelector<HTMLElement>('#fc-status');
     const outputNode = panel.querySelector<HTMLElement>('#fc-output');
-    const actionButtons = Array.from(panel.querySelectorAll<HTMLButtonElement>('button[data-action]'));
 
-    let selectedAction: TiebaAction = 'addPost';
+    let activeTab: PanelTab = 'query';
     const runtimeContext: RuntimeContext = {
       threadId: readCurrentThreadId(),
       postId: readCurrentPostId(),
@@ -441,6 +465,76 @@ export default defineContentScript({
     const setFeedback = (message: string): void => {
       if (feedbackNode) {
         feedbackNode.textContent = `最近状态：${message}`;
+      }
+    };
+
+    const setActiveTab = (tab: PanelTab): void => {
+      activeTab = tab;
+      postSection?.classList.toggle('hidden', tab !== 'post');
+      replySection?.classList.toggle('hidden', tab !== 'reply');
+      querySection?.classList.toggle('hidden', tab !== 'query');
+
+      for (const button of tabButtons) {
+        const isActive = button.dataset.tab === tab;
+        button.classList.toggle('bg-black', isActive);
+        button.classList.toggle('text-white', isActive);
+        button.classList.toggle('dark:bg-white', isActive);
+        button.classList.toggle('dark:text-black', isActive);
+      }
+
+      if (statusNode) {
+        const label = tab === 'post' ? '发帖' : tab === 'reply' ? '回复' : '查询帖子';
+        statusNode.textContent = `当前导航：${label}`;
+      }
+    };
+
+    const executeAction = async (action: TiebaAction): Promise<void> => {
+      if (!statusNode || !outputNode) {
+        return;
+      }
+
+      const payload = buildPayload(action, panel, runtimeContext);
+      const error = validatePayload(action, payload);
+      if (error) {
+        statusNode.textContent = error;
+        outputNode.textContent = '参数校验失败';
+        setFeedback('参数校验失败');
+        return;
+      }
+
+      const controlButtons = [runPostBtn, runReplyBtn, runLikeBtn, runListBtn, runDetailBtn, runReplyMeBtn];
+      for (const button of controlButtons) {
+        if (button) {
+          button.disabled = true;
+        }
+      }
+
+      statusNode.textContent = `执行中：${actionLabelMap[action]}...`;
+      setFeedback(`执行中：${actionLabelMap[action]}`);
+
+      try {
+        const message: TiebaRequest = {
+          type: 'tieba:request',
+          action,
+          payload,
+        };
+        const response = (await browser.runtime.sendMessage(message)) as TiebaResponse;
+        if (!response?.ok) {
+          throw new Error(response?.error || '请求失败');
+        }
+        statusNode.textContent = `执行成功：${actionLabelMap[action]}`;
+        outputNode.textContent = summarizeResult(action, response.data, runtimeContext);
+        setFeedback(`执行成功：${actionLabelMap[action]}`);
+      } catch (requestError) {
+        statusNode.textContent = requestError instanceof Error ? requestError.message : '请求失败';
+        outputNode.textContent = '执行失败';
+        setFeedback(`执行失败：${actionLabelMap[action]}`);
+      } finally {
+        for (const button of controlButtons) {
+          if (button) {
+            button.disabled = false;
+          }
+        }
       }
     };
 
@@ -524,19 +618,6 @@ export default defineContentScript({
       const toggleRect = toggle.getBoundingClientRect();
       placeToggle(toggleRect.left, toggleRect.top);
     });
-
-    function paintSelected(): void {
-      for (const button of actionButtons) {
-        if (button.dataset.action === selectedAction) {
-          button.classList.add('bg-black', 'text-white', 'dark:bg-white', 'dark:text-black');
-        } else {
-          button.classList.remove('bg-black', 'text-white', 'dark:bg-white', 'dark:text-black');
-        }
-      }
-      if (statusNode) {
-        statusNode.textContent = `已选择动作：${actionLabelMap[selectedAction]}`;
-      }
-    }
 
     close?.addEventListener('click', () => {
       panel.classList.add('hidden');
@@ -642,55 +723,35 @@ export default defineContentScript({
       }
     });
 
-    for (const button of actionButtons) {
+    for (const button of tabButtons) {
       button.addEventListener('click', () => {
-        const action = button.dataset.action as TiebaAction | undefined;
-        if (!action) return;
-        selectedAction = action;
-        paintSelected();
+        const tab = button.dataset.tab as PanelTab | undefined;
+        if (!tab) {
+          return;
+        }
+        setActiveTab(tab);
       });
     }
 
-    runBtn?.addEventListener('click', async () => {
-      if (!runBtn || !statusNode || !outputNode) {
-        return;
-      }
-
-      const payload = buildPayload(selectedAction, panel, runtimeContext);
-      const error = validatePayload(selectedAction, payload);
-      if (error) {
-        statusNode.textContent = error;
-        outputNode.textContent = '参数校验失败';
-        setFeedback('参数校验失败');
-        return;
-      }
-
-      runBtn.disabled = true;
-      statusNode.textContent = `执行中：${actionLabelMap[selectedAction]}...`;
-      setFeedback(`执行中：${actionLabelMap[selectedAction]}`);
-
-      try {
-        const message: TiebaRequest = {
-          type: 'tieba:request',
-          action: selectedAction,
-          payload,
-        };
-        const response = (await browser.runtime.sendMessage(message)) as TiebaResponse;
-        if (!response?.ok) {
-          throw new Error(response?.error || '请求失败');
-        }
-        statusNode.textContent = `执行成功：${actionLabelMap[selectedAction]}`;
-        outputNode.textContent = summarizeResult(selectedAction, response.data, runtimeContext);
-        setFeedback(`执行成功：${actionLabelMap[selectedAction]}`);
-      } catch (requestError) {
-        statusNode.textContent = requestError instanceof Error ? requestError.message : '请求失败';
-        outputNode.textContent = '执行失败';
-        setFeedback(`执行失败：${actionLabelMap[selectedAction]}`);
-      } finally {
-        runBtn.disabled = false;
-      }
+    runPostBtn?.addEventListener('click', () => {
+      void executeAction('addThread');
+    });
+    runReplyBtn?.addEventListener('click', () => {
+      void executeAction('addPost');
+    });
+    runLikeBtn?.addEventListener('click', () => {
+      void executeAction('opAgree');
+    });
+    runListBtn?.addEventListener('click', () => {
+      void executeAction('listThreads');
+    });
+    runDetailBtn?.addEventListener('click', () => {
+      void executeAction('threadDetail');
+    });
+    runReplyMeBtn?.addEventListener('click', () => {
+      void executeAction('replyMe');
     });
 
-    paintSelected();
+    setActiveTab(activeTab);
   },
 });
